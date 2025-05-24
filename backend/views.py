@@ -42,7 +42,7 @@ def execute_ssh_command(pool, command):
         if client:
             pool.return_connection(client)
 
-def stream_ssh_command(pool, command):
+def stream_ssh_command(pool, command, slp=True):
     """使用连接池执行SSH命令并返回生成器"""
     client = None
     try:
@@ -57,7 +57,8 @@ def stream_ssh_command(pool, command):
                 continue
             
             yield f"data: {line.rstrip()}\n\n"
-            time.sleep(0.1)
+            if slp == True:
+                time.sleep(0.1)
         
         yield "data: [done]\n\n"
     except Exception as e:
@@ -187,10 +188,33 @@ def part3_cgafile(request, framework, algo, rw):
 
 
 
-def part3(request, framework, algo):
+def part3_3(request, framework, algo):
+    cmd = f'/home/jinjm/anaconda3/bin/python -u /home/jinjm/local/run_graph_computing.py --fw {framework} --"data" {algo}'
+    try:
+        response = StreamingHttpResponse(
+            stream_ssh_command(pool86, cmd),
+            content_type='text/event-stream',
+        )
+        response['Cache-Control'] = 'no-cache'
+        return response
+        
+    except Exception as e:
+        print(f"[part3] 响应创建失败: {str(e)}")
+        return JsonResponse(
+            {"status": 500, "error": str(e)},
+            status=500
+        )
+
+
+
+def part3(request, framework, algo, dataset):
     print("[part3] 收到请求")
-    
-    cmd = f'/home/jinjm/anaconda3/bin/python -u /home/jinjm/local/run_graph_computing.py --fw {framework} --{"data" if framework == "3" else "algo"} {algo}'
+    if framework == "1":
+        cmd = f"/home/jinjm/anaconda3/bin/python -u /home/jinjm/local/run_part3.py --fw fw1 --op run --algorithm {algo} --dataset {dataset}"
+    elif framework == "2":
+        cmd = f"/home/jinjm/anaconda3/bin/python -u /home/jinjm/local/run_part3.py --fw fw2 --op run --algorithm {algo} --dataset {dataset}"
+    elif framework == "3":
+        cmd = f'/home/jinjm/anaconda3/bin/python -u /home/jinjm/local/run_graph_computing.py --fw {framework} --"data" {algo}'    
     print("执行命令:", cmd)
     
     try:
@@ -266,14 +290,6 @@ def part3data(request, framework, algo, data_type):
         with open(cache_file, 'r') as f:
             cached_data = json.load(f)
         
-        # 3. 检查请求的数据类型是否有效
-        valid_data_types = ["asm", "CGA", "GraphIR", "log", "MatrixIR", "pregel"]
-        if data_type not in valid_data_types:
-            return JsonResponse(
-                {"status": 400, "error": f"无效的数据类型，有效类型为: {valid_data_types}"},
-                status=400
-            )
-        
         # 4. 检查请求的数据是否存在
         if "data" not in cached_data or data_type not in cached_data["data"]:
             return JsonResponse(
@@ -302,15 +318,16 @@ def part3data(request, framework, algo, data_type):
         )
 
 
-def part3_moni(request, algo):
+def part3_moni(request, framework, algo, dataset):
     print("[part3] 收到请求")
     
-    cmd = f'bash /home/jinjm/local/run_graph_1.sh {algo}'
+    cmd = f"/home/jinjm/anaconda3/bin/python -u /home/jinjm/local/run_part3.py --fw fw1 --op runsim --algorithm {algo} --dataset {dataset}"
+    # cmd = f'bash /home/jinjm/local/run_graph_1.sh {algo}'
     print("执行命令:", cmd)
     
     try:
         response = StreamingHttpResponse(
-            stream_ssh_command(pool86, cmd),
+            stream_ssh_command(pool86, cmd, slp=False),
             content_type='text/event-stream',
         )
         response['Cache-Control'] = 'no-cache'
@@ -325,15 +342,14 @@ def part3_moni(request, algo):
 
 
 
-def part3_moni2(request, algo):
+def part3_moni2(request, algo, dataset):
     print("[part3] 收到请求")
-    
-    cmd = f'bash /home/jinjm/local/run_graph_2.sh {algo}'
+    cmd = f"/home/jinjm/anaconda3/bin/python -u /home/jinjm/local/run_part3.py --fw fw2 --op runsim --algorithm {algo} --dataset {dataset}"
     print("执行命令:", cmd)
     
     try:
         response = StreamingHttpResponse(
-            stream_ssh_command(pool86, cmd),
+            stream_ssh_command(pool86, cmd, slp=False),
             content_type='text/event-stream',
         )
         response['Cache-Control'] = 'no-cache'

@@ -29,11 +29,12 @@ urlpatterns = [
     path('part1/result/<str:algo>/<str:dataset>/', views.get_part1_result, name="part1"),
 
     path('part3/cgafile/<str:framework>/<str:algo>/<str:rw>/', views.part3_cgafile, name="part3_cgafile"),
-    path('part3/execute/<str:framework>/<str:algo>/', views.part3, name="part3"),
+    path('part3/execute/<str:framework>/<str:algo>/', views.part3_3, name="part3"),
+    path('part3/execute/<str:framework>/<str:algo>/<str:dataset>/', views.part3, name="part3"),
     path('part3/result/<str:framework>/<str:algo>/', views.get_part3_result, name='get_part3_result'),
     path('part3data/<str:framework>/<str:algo>/<str:data_type>/', views.part3data, name='part3data'),
-    path('part3/moni/<str:algo>/',views.part3_moni, name="part3_moni"),
-    path('part3/moni2/<str:algo>/',views.part3_moni2, name="part3_moni2"),
+    path('part3/moni/<str:framework>/<str:algo>/<str:dataset>/',views.part3_moni, name="part3_moni"),
+    path('part3/moni2/<str:algo>/<str:dataset>/',views.part3_moni2, name="part3_moni2"),
     
 
     
