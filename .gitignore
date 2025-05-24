@@ -1,10 +1,9 @@
 logs/
 venv/
-*.log
 .idea/
 dist/
 
 **/__pycache__
-
+/part3_cache
 test.py
 

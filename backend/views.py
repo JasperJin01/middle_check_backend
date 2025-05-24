@@ -1,4 +1,4 @@
-from django.http import HttpResponse, StreamingHttpResponse, JsonResponse
+from django.http import HttpResponse, StreamingHttpResponse, JsonResponse, HttpResponseNotFound
 import subprocess
 import json
 import re
@@ -7,55 +7,14 @@ import os
 import time
 from pathlib import Path
 
+
+KEY_PATH = '/home/jasper/Developer/PyCharm/id_rsa_hust_server'
+SERVER84 = 'jinjm@192.168.165.231'
+SERVER86 = 'jinjm@192.168.165.232'
+
 def hello(request):
     print("debug: hello")
     return HttpResponse("Hello world ! ")
-
-def runtest(request):
-    def generate():
-        # 固定命令 - 连接到服务器并执行ls命令
-        cmd = 'ssh -i /home/jasper/Developer/PyCharm/id_rsa_hust_server -p 50017 jinjm@222.20.95.34 "cd /home/jinjm/dev/pytorch-vit/ && /home/jinjm/anaconda3/envs/pt38/bin/python -u predict.py"'
-        
-        # 执行命令
-        proc = subprocess.Popen(
-            cmd,
-            shell=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True
-        )
-        
-        # 流式返回输出
-        for line in proc.stdout:
-            yield f"data: {line}\n\n"
-    return StreamingHttpResponse(generate(), content_type='text/event-stream')
-
-
-def run86triangle1(request):
-    print('run86triangle1...')
-    cmd = 'ssh -i /home/jasper/Developer/PyCharm/id_rsa_hust_server -p 22222 jinjm@192.168.165.232 "/home/jinjm/anaconda3/bin/python /home/jinjm/local/run_triangle.py"'
-    
-    try:
-        print('开始执行')
-        output = subprocess.check_output(cmd, shell=True, stderr=subprocess.PIPE, text=True)
-        print('执行完毕')
-        
-        # 关键处理：将字符串转换为字典
-        try:
-            json_data = ast.literal_eval(output)
-            return JsonResponse(json_data)
-        except json.JSONDecodeError:      
-            print('json_data error', output)
-            return JsonResponse(
-                {"status": 500, "error": "json格式错误"},
-                status=500
-            )
-            
-    except subprocess.CalledProcessError as e:
-        return JsonResponse(
-            {"status": 500, "error": e.stderr},
-            status=500
-        )
 
 
 """
@@ -66,7 +25,7 @@ def part1(request, algo, dataset):
     print(f'[part1_execute] 请求算法：{algo} 数据集: {dataset}')
 
     # 构建SSH命令（添加stdbuf -oL确保行缓冲）
-    cmd = f'ssh -i /home/jasper/Developer/PyCharm/id_rsa_hust_server -p 22222 jinjm@192.168.165.231 "stdbuf -oL /usr/bin/python3 -u /home/jinjm/local/cmd/run_part1.py --algo {algo} --dataset {dataset}"'
+    cmd = f'ssh -i {KEY_PATH} -p 22222 {SERVER84} "stdbuf -oL /usr/bin/python3 -u /home/jinjm/local/cmd/run_part1.py --algo {algo} --dataset {dataset}"'
     print(f'[part1_execute] 执行命令: {cmd}')
     
     try:
@@ -92,7 +51,7 @@ def get_part1_result(request, algo, dataset):
     
     # 固定结果文件路径
     result_file = f'/home/jinjm/local/result_{algo}_{dataset}.json'
-    cmd = f'ssh -i /home/jasper/Developer/PyCharm/id_rsa_hust_server -p 22222 jinjm@192.168.165.231 "cat {result_file}"'
+    cmd = f'ssh -i {KEY_PATH} -p 22222 {SERVER84} "cat {result_file}"'
     
     try:
         print(f'[get_part1_result] 获取结果: {cmd}')
@@ -122,12 +81,23 @@ def get_part1_result(request, algo, dataset):
 
 
 
-CACHE_DIR = Path("/home/jasper/part3_cache")
+# CACHE_DIR = Path("/home/jasper/part3_cache")
+# CACHE_DIR.mkdir(exist_ok=True, parents=True)
+
+# def get_cache_path(framework, algo):
+#     """获取缓存文件路径"""
+#     return CACHE_DIR / f"{framework}_{algo}.json"
+
+
+# 获取当前项目根目录（假设 part3_cache 和 backend 同级）
+PROJECT_ROOT = Path(__file__).parent.parent  # backend -> 项目根目录
+CACHE_DIR = PROJECT_ROOT / "part3_cache"
 CACHE_DIR.mkdir(exist_ok=True, parents=True)
 
 def get_cache_path(framework, algo):
     """获取缓存文件路径"""
     return CACHE_DIR / f"{framework}_{algo}.json"
+
 
 
 def command_stream_generator(cmd):
@@ -179,11 +149,59 @@ def command_stream_generator(cmd):
             print("[stream_gen] 已终止子进程")
 
 
+def part3_cgafile(request, framework, algo, rw):
+    print("[part3_cgafile] 收到请求")
+    # 构建SSH命令
+    cmd = f'ssh -i {KEY_PATH} -p 22222 {SERVER86} "stdbuf -oL /home/jinjm/anaconda3/bin/python -u /home/jinjm/local/run_part3.py --fw fw1 --op readfile --algorithm {algo}"'
+    print("执行命令:", cmd)
+
+    try:
+        # 执行命令并捕获输出
+        process = subprocess.Popen(
+            cmd,
+            shell=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True
+        )
+        
+        # 读取标准输出和错误
+        stdout, stderr = process.communicate()
+        
+        # 检查返回码
+        if process.returncode != 0:
+            return JsonResponse({
+                'status': 'error',
+                'message': f'命令执行失败 (返回码: {process.returncode})',
+                'error': stderr.strip(),
+                'command': cmd
+            }, status=500)
+        
+        # 成功返回
+        return JsonResponse({
+            'status': 'success',
+            'framework': framework,
+            'algorithm': algo,
+            'operation': 'readfile',
+            'content': stdout.strip(),
+            'command': cmd
+        })
+        
+    except Exception as e:
+        return JsonResponse({
+            'status': 'error',
+            'message': '执行过程中发生异常',
+            'error': str(e),
+            'command': cmd
+        }, status=500)
+
+
+
 def part3(request, framework, algo):
     print("[part3] 收到请求")
     
     # 构建SSH命令
-    cmd = f'ssh -i /home/jasper/Developer/PyCharm/id_rsa_hust_server -p 22222 jinjm@192.168.165.232 "stdbuf -oL /home/jinjm/anaconda3/bin/python -u /home/jinjm/local/run_graph_computing.py --fw {framework} --{"data" if framework == "3" else "algo"} {algo}"'
+    cmd = f'ssh -i {KEY_PATH} -p 22222 {SERVER86} "stdbuf -oL /home/jinjm/anaconda3/bin/python -u /home/jinjm/local/run_graph_computing.py --fw {framework} --{"data" if framework == "3" else "algo"} {algo}"'
     print("执行命令:", cmd)
     
     try:
@@ -212,7 +230,7 @@ def get_part3_result(request, framework, algo):
     
     try:
         # 从远程服务器获取结果
-        json_cmd = f'ssh -i /home/jasper/Developer/PyCharm/id_rsa_hust_server -p 22222 jinjm@192.168.165.232 "cat /home/jinjm/local/result.json"'
+        json_cmd = f'ssh -i {KEY_PATH} -p 22222 {SERVER86} "cat /home/jinjm/local/result.json"'
         result = subprocess.check_output(json_cmd, shell=True)
         json_data = json.loads(result)
         
@@ -297,26 +315,11 @@ def part3data(request, framework, algo, data_type):
         )
 
 
-def get_result(request):
-    """
-    获取之前执行的JSON结果
-    注意：这个接口现在可能不需要了，因为JSON结果已经附加到流式响应中
-    """
-    try:
-        with open('/home/jasper/result.txt', 'r', encoding='utf-8') as f:
-            json_data = json.load(f)
-        return JsonResponse(json_data)
-    except Exception as e:
-        return JsonResponse(
-            {"status": 500, "error": str(e)},
-            status=500
-        )
-
 def part3_moni(request, algo):
     print("[part3] 收到请求")
     
     # 构建SSH命令
-    cmd = cmd = f'ssh -i /home/jasper/Developer/PyCharm/id_rsa_hust_server -p 22222 jinjm@192.168.165.232 "stdbuf -oL bash /home/jinjm/local/run_graph_1.sh {algo}"'
+    cmd = cmd = f'ssh -i {KEY_PATH} -p 22222 {SERVER86} "stdbuf -oL bash /home/jinjm/local/run_graph_1.sh {algo}"'
     print("执行命令:", cmd)
     
     try:
@@ -342,7 +345,7 @@ def part3_moni2(request, algo):
     print("[part3] 收到请求")
     
     # 构建SSH命令
-    cmd = cmd = f'ssh -i /home/jasper/Developer/PyCharm/id_rsa_hust_server -p 22222 jinjm@192.168.165.232 "stdbuf -oL bash /home/jinjm/local/run_graph_2.sh {algo}"'
+    cmd = cmd = f'ssh -i {KEY_PATH} -p 22222 {SERVER86} "stdbuf -oL bash /home/jinjm/local/run_graph_2.sh {algo}"'
     print("执行命令:", cmd)
     
     try:
@@ -364,11 +367,10 @@ def part3_moni2(request, algo):
 
 
 
-
 def stream_test(request):
     print("[stream_test] 收到SSE请求")
     try:
-        cmd = 'ssh -i /home/jasper/Developer/PyCharm/id_rsa_hust_server -p 22222 jinjm@192.168.165.231 "stdbuf -oL bash /home/jinjm/local/cmd/run_stream.sh"'
+        cmd = f'ssh -i {KEY_PATH} -p 22222 {SERVER84} "stdbuf -oL bash /home/jinjm/local/cmd/run_stream.sh"'
         response = StreamingHttpResponse(
             command_stream_generator(cmd),
             content_type='text/event-stream',
@@ -382,12 +384,12 @@ def stream_test(request):
 
 
 def read_log_file(request, filename):
-    # 定义日志文件基础路径
-    log_dir = "/home/jasper/Developer/middle_check/data/"
+    # 获取当前文件（views.py）的绝对路径目录（backend目录）
+    current_dir = os.path.dirname(os.path.abspath(__file__))
     
-    # 构建完整文件路径（添加.log后缀）
-    log_file_path = os.path.join(log_dir, f"{filename}.log")
-    
+    # 构建相对路径：backend -> 项目根目录 -> logfile -> 目标文件
+    log_file_path = os.path.normpath(os.path.join(current_dir, '..', 'logfile', f"{filename}.log"))
+        
     # 检查文件是否存在
     if not os.path.exists(log_file_path):
         return HttpResponseNotFound(f"Log file {filename}.log not found")
