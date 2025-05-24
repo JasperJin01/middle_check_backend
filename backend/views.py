@@ -6,11 +6,65 @@ import ast
 import os
 import time
 from pathlib import Path
+from .ssh_pool import SSHConnectionPool
 
 
-KEY_PATH = '/home/jasper/Developer/PyCharm/id_rsa_hust_server'
+# KEY_PATH = '/home/jasper/Developer/PyCharm/id_rsa_hust_server'
+KEY_PATH = '/Users/jiminj/.ssh/id_rsa_hust_server'
 SERVER84 = 'jinjm@192.168.165.231'
 SERVER86 = 'jinjm@192.168.165.232'
+
+# 创建SSH连接池
+pool84 = SSHConnectionPool(
+    hostname='192.168.165.231',
+    username='jinjm',
+    key_filename=KEY_PATH,
+    port=22222,
+    max_connections=5
+)
+
+pool86 = SSHConnectionPool(
+    hostname='192.168.165.232',
+    username='jinjm',
+    key_filename=KEY_PATH,
+    port=22222,
+    max_connections=5
+)
+
+def execute_ssh_command(pool, command):
+    """使用连接池执行SSH命令"""
+    client = None
+    try:
+        client = pool.get_connection()
+        stdin, stdout, stderr = client.exec_command(command)
+        return stdout.read().decode(), stderr.read().decode()
+    finally:
+        if client:
+            pool.return_connection(client)
+
+def stream_ssh_command(pool, command):
+    """使用连接池执行SSH命令并返回生成器"""
+    client = None
+    try:
+        client = pool.get_connection()
+        stdin, stdout, stderr = client.exec_command(command)
+        
+        while True:
+            line = stdout.readline()
+            if not line:
+                if stdout.channel.exit_status_ready():
+                    break
+                continue
+            
+            yield f"data: {line.rstrip()}\n\n"
+            time.sleep(0.1)
+        
+        yield "data: [done]\n\n"
+    except Exception as e:
+        yield f"data: [error] {str(e)}\n\n"
+    finally:
+        if client:
+            pool.return_connection(client)
 
 def hello(request):
     print("debug: hello")
@@ -24,14 +78,12 @@ dataset参数：rmat16, rmat17, rmat18, rmat19, rmat20
 def part1(request, algo, dataset):
     print(f'[part1_execute] 请求算法：{algo} 数据集: {dataset}')
 
-    # 构建SSH命令（添加stdbuf -oL确保行缓冲）
-    cmd = f'ssh -i {KEY_PATH} -p 22222 {SERVER84} "stdbuf -oL /usr/bin/python3 -u /home/jinjm/local/cmd/run_part1.py --algo {algo} --dataset {dataset}"'
+    cmd = f'/usr/bin/python3 -u /home/jinjm/local/cmd/run_part1.py --algo {algo} --dataset {dataset}'
     print(f'[part1_execute] 执行命令: {cmd}')
     
     try:
-        # 流式执行命令
         response = StreamingHttpResponse(
-            command_stream_generator(cmd),
+            stream_ssh_command(pool84, cmd),
             content_type='text/event-stream',
         )
         response['Cache-Control'] = 'no-cache'
@@ -49,23 +101,21 @@ def get_part1_result(request, algo, dataset):
     """获取part1执行结果"""
     print('[get_part1_result] 请求结果')
     
-    # 固定结果文件路径
     result_file = f'/home/jinjm/local/result_{algo}_{dataset}.json'
-    cmd = f'ssh -i {KEY_PATH} -p 22222 {SERVER84} "cat {result_file}"'
+    cmd = f'cat {result_file}'
     
     try:
         print(f'[get_part1_result] 获取结果: {cmd}')
-        result = subprocess.check_output(cmd, shell=True, stderr=subprocess.PIPE, text=True)
+        stdout, stderr = execute_ssh_command(pool84, cmd)
         
-        # 直接返回远程文件内容（假设已经是合法JSON）
-        return JsonResponse(json.loads(result))
+        if stderr:
+            return JsonResponse(
+                {"status": 500, "error": "获取结果失败", "details": stderr},
+                status=500
+            )
         
-    except subprocess.CalledProcessError as e:
-        print(f'[get_part1_result] 命令执行失败: {e.stderr}')
-        return JsonResponse(
-            {"status": 500, "error": "获取结果失败", "details": e.stderr},
-            status=500
-        )
+        return JsonResponse(json.loads(stdout))
+        
     except json.JSONDecodeError:
         print('[get_part1_result] JSON解析失败')
         return JsonResponse(
@@ -100,93 +150,33 @@ def get_cache_path(framework, algo):
 
 
 
-def command_stream_generator(cmd):
-    print(f"[stream_gen] 执行命令: {cmd}")
-    process = subprocess.Popen(
-        cmd,
-        shell=True,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        bufsize=1,
-    )
-
-    try:
-        print("[stream_gen] 进程已启动，开始读取输出...")
-        while True:
-            line_bytes = process.stdout.readline()
-            if not line_bytes:
-                if process.poll() is not None:
-                    break
-                continue
-
-            try:
-                line = line_bytes.decode('utf-8').rstrip('\n')
-            except UnicodeDecodeError as e:
-                line = f"[解码错误] {str(e)}"
-                print(f"[stream_gen] {line}")
-
-            print(f"[stream_gen] 准备发送整行内容: {line}")
-            
-            # 直接发送完整行（保留换行符）
-            event_data = f"data: {line}\n\n"
-            yield event_data
-            time.sleep(0.1)
-            print(f"[stream_gen] 已发送完整行数据")
-
-            # 保留原换行逻辑（可选）
-            # yield "data: </br>\n\n"
-            # time.sleep(0.1)  # 如果仍需间隔
-
-        print("[stream_gen] 流式输出完成")
-        yield "data: [done]\n\n"
-
-    except Exception as e:
-        print(f"[stream_gen] 发生异常: {str(e)}")
-        yield "data: [error]\n\n"
-    finally:
-        if process.poll() is None:
-            process.terminate()
-            print("[stream_gen] 已终止子进程")
-
-
 def part3_cgafile(request, framework, algo, rw):
     print("[part3_cgafile] 收到请求")
-    # 构建SSH命令
-    cmd = f'ssh -i {KEY_PATH} -p 22222 {SERVER86} "stdbuf -oL /home/jinjm/anaconda3/bin/python -u /home/jinjm/local/run_part3.py --fw fw1 --op readfile --algorithm {algo}"'
+    cmd = f'/home/jinjm/anaconda3/bin/python -u /home/jinjm/local/run_part3.py --fw fw1 --op readfile --algorithm {algo}'
     print("执行命令:", cmd)
 
     try:
-        # 执行命令并捕获输出
-        process = subprocess.Popen(
-            cmd,
-            shell=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True
-        )
+        stdout, stderr = execute_ssh_command(pool86, cmd)
         
-        # 读取标准输出和错误
-        stdout, stderr = process.communicate()
-        
-        # 检查返回码
-        if process.returncode != 0:
+        if stderr:
             return JsonResponse({
                 'status': 'error',
-                'message': f'命令执行失败 (返回码: {process.returncode})',
-                'error': stderr.strip(),
+                'message': '命令执行失败',
+                'error': stderr,
                 'command': cmd
             }, status=500)
         
-        # 成功返回
+        output_lines = stdout.splitlines()
+        
         return JsonResponse({
             'status': 'success',
             'framework': framework,
             'algorithm': algo,
             'operation': 'readfile',
-            'content': stdout.strip(),
+            'content': output_lines,
             'command': cmd
         })
-        
+
     except Exception as e:
         return JsonResponse({
             'status': 'error',
@@ -200,18 +190,15 @@ def part3_cgafile(request, framework, algo, rw):
 def part3(request, framework, algo):
     print("[part3] 收到请求")
     
-    # 构建SSH命令
-    cmd = f'ssh -i {KEY_PATH} -p 22222 {SERVER86} "stdbuf -oL /home/jinjm/anaconda3/bin/python -u /home/jinjm/local/run_graph_computing.py --fw {framework} --{"data" if framework == "3" else "algo"} {algo}"'
+    cmd = f'/home/jinjm/anaconda3/bin/python -u /home/jinjm/local/run_graph_computing.py --fw {framework} --{"data" if framework == "3" else "algo"} {algo}'
     print("执行命令:", cmd)
     
     try:
-        # 流式执行命令
         response = StreamingHttpResponse(
-            command_stream_generator(cmd),
+            stream_ssh_command(pool86, cmd),
             content_type='text/event-stream',
         )
         response['Cache-Control'] = 'no-cache'
-        
         return response
         
     except Exception as e:
@@ -229,10 +216,16 @@ def get_part3_result(request, framework, algo):
     print(f"[get_part3_result] 获取结果: {framework}/{algo}")
     
     try:
-        # 从远程服务器获取结果
-        json_cmd = f'ssh -i {KEY_PATH} -p 22222 {SERVER86} "cat /home/jinjm/local/result.json"'
-        result = subprocess.check_output(json_cmd, shell=True)
-        json_data = json.loads(result)
+        cmd = "cat /home/jinjm/local/result.json"
+        stdout, stderr = execute_ssh_command(pool86, cmd)
+        
+        if stderr:
+            return JsonResponse(
+                {"status": 500, "error": stderr},
+                status=500
+            )
+        
+        json_data = json.loads(stdout)
         
         # 缓存到本地文件
         cache_file = get_cache_path(framework, algo)
@@ -242,12 +235,6 @@ def get_part3_result(request, framework, algo):
         
         return JsonResponse(json_data)
         
-    except subprocess.CalledProcessError as e:
-        print(f"[get_part3_result] 获取JSON结果失败: {str(e)}")
-        return JsonResponse(
-            {"status": 500, "error": str(e)},
-            status=500
-        )
     except json.JSONDecodeError:
         print("[get_part3_result] JSON解析错误")
         return JsonResponse(
@@ -318,18 +305,15 @@ def part3data(request, framework, algo, data_type):
 def part3_moni(request, algo):
     print("[part3] 收到请求")
     
-    # 构建SSH命令
-    cmd = cmd = f'ssh -i {KEY_PATH} -p 22222 {SERVER86} "stdbuf -oL bash /home/jinjm/local/run_graph_1.sh {algo}"'
+    cmd = f'bash /home/jinjm/local/run_graph_1.sh {algo}'
     print("执行命令:", cmd)
     
     try:
-        # 流式执行命令
         response = StreamingHttpResponse(
-            command_stream_generator(cmd),
+            stream_ssh_command(pool86, cmd),
             content_type='text/event-stream',
         )
         response['Cache-Control'] = 'no-cache'
-        
         return response
         
     except Exception as e:
@@ -344,18 +328,15 @@ def part3_moni(request, algo):
 def part3_moni2(request, algo):
     print("[part3] 收到请求")
     
-    # 构建SSH命令
-    cmd = cmd = f'ssh -i {KEY_PATH} -p 22222 {SERVER86} "stdbuf -oL bash /home/jinjm/local/run_graph_2.sh {algo}"'
+    cmd = f'bash /home/jinjm/local/run_graph_2.sh {algo}'
     print("执行命令:", cmd)
     
     try:
-        # 流式执行命令
         response = StreamingHttpResponse(
-            command_stream_generator(cmd),
+            stream_ssh_command(pool86, cmd),
             content_type='text/event-stream',
         )
         response['Cache-Control'] = 'no-cache'
-        
         return response
         
     except Exception as e:
@@ -370,9 +351,9 @@ def part3_moni2(request, algo):
 def stream_test(request):
     print("[stream_test] 收到SSE请求")
     try:
-        cmd = f'ssh -i {KEY_PATH} -p 22222 {SERVER84} "stdbuf -oL bash /home/jinjm/local/cmd/run_stream.sh"'
+        cmd = 'bash /home/jinjm/local/cmd/run_stream.sh'
         response = StreamingHttpResponse(
-            command_stream_generator(cmd),
+            stream_ssh_command(pool84, cmd),
             content_type='text/event-stream',
         )
         response['Cache-Control'] = 'no-cache'

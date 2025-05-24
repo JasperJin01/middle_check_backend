@@ -26,7 +26,7 @@ SECRET_KEY = "django-insecure-w1tl&a1_cpj0@d*yq(d4$_2xi9m&9#qj*50_wqyv3j(xia@3_d
 DEBUG = True
 
 ALLOWED_HOSTS = ["10.21.145.217", # rog-linux 校园网 ip
-                '10.21.147.145' # mbp 校园网 ip
+                '10.21.147.145', # mbp 校园网 ip
                 'localhost', 
                 '127.0.0.1', 
                 '115.29.241.134' # aliyun ip
