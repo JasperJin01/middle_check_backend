@@ -29,7 +29,7 @@ ALLOWED_HOSTS = ["10.21.145.217", # rog-linux 校园网 ip
                 '10.21.147.145', # mbp 校园网 ip
                 'localhost', 
                 '127.0.0.1', 
-                '115.29.241.134' # aliyun ip
+                '10.11.74.113'
                 ]
 # ALLOWED_HOSTS = ['*']
 

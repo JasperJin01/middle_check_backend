@@ -33,8 +33,12 @@ urlpatterns = [
     path('part3/execute/<str:framework>/<str:algo>/<str:dataset>/', views.part3, name="part3"),
     path('part3/result/<str:framework>/<str:algo>/', views.get_part3_result, name='get_part3_result'),
     path('part3data/<str:framework>/<str:algo>/<str:data_type>/', views.part3data, name='part3data'),
+
+    path('part3editarg/moni/1/<str:algo>/<str:dataset>/<str:editarg>/',views.part3_moni_editarg, name="part3_moni_editarg"),
     path('part3/moni/<str:framework>/<str:algo>/<str:dataset>/',views.part3_moni, name="part3_moni"),
+
     path('part3/moni2/<str:algo>/<str:dataset>/',views.part3_moni2, name="part3_moni2"),
+    path('part3/write/1/<str:algo>/', views.part3_writecga, name='part3_writecga'),
     
 
     

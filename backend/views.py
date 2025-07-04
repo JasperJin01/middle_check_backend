@@ -10,24 +10,28 @@ from .ssh_pool import SSHConnectionPool
 
 
 # KEY_PATH = '/home/jasper/Developer/PyCharm/id_rsa_hust_server'
-KEY_PATH = '/Users/jiminj/.ssh/id_rsa_hust_server'
-SERVER84 = 'jinjm@192.168.165.231'
-SERVER86 = 'jinjm@192.168.165.232'
+KEY_PATH = '/home/jinjm/.ssh/id_rsa_hust_server'
+
+SERVER86 = 'jinjm@222.20.98.153'
 
 # 创建SSH连接池
 pool84 = SSHConnectionPool(
-    hostname='192.168.165.231',
+    # hostname='192.168.165.231',
+    hostname='222.20.98.153',
     username='jinjm',
     key_filename=KEY_PATH,
-    port=22222,
+    port=21700,
     max_connections=5
 )
 
+# 把86替换为新服务器
 pool86 = SSHConnectionPool(
-    hostname='192.168.165.232',
+    # hostname='192.168.165.232',
+    hostname='222.20.98.153',
     username='jinjm',
     key_filename=KEY_PATH,
-    port=22222,
+    # port=22222,
+    port=21700,
     max_connections=5
 )
 
@@ -317,9 +321,58 @@ def part3data(request, framework, algo, data_type):
             status=500
         )
 
+def part3_writecga(request, algo):
+    print("[part3_writecga] 收到请求")
+    CGA_DIR = Path("/home/jinjm/graph_computing/cga")
+    if request.method != 'POST':
+        return JsonResponse(
+            {"status": 405, "error": "Method not allowed"}, 
+            status=405
+        )
+    
+    try:
+        # 解析JSON请求体
+        data = json.loads(request.body)
+        code = data.get('code', '')
+        
+        if not code:
+            return JsonResponse(
+                {"status": 400, "error": "No code provided"},
+                status=400
+            )
+        
+        # 构造文件路径
+        file_path = CGA_DIR / f"{algo}.py"
+        
+        # 写入文件
+        with open(file_path, 'w') as f:
+            f.write(code)
+        
+        return JsonResponse({
+            "status": 200,
+            "message": "Code saved successfully",
+            "path": str(file_path)
+        })
+        
+    except json.JSONDecodeError:
+        return JsonResponse(
+            {"status": 400, "error": "Invalid JSON format"},
+            status=400
+        )
+    except Exception as e:
+        return JsonResponse(
+            {"status": 500, "error": f"Server error: {str(e)}"},
+            status=500
+        )
+
+
+
 
 def part3_moni(request, framework, algo, dataset):
     print("[part3] 收到请求")
+
+    if algo in ['cf', 'gcn', 'ppr'] and dataset in ['Rmat-16','Rmat-18', 'Rmat-20','Rmat-17']:
+        return stream_log_file(algo, dataset)
     
     cmd = f"/home/jinjm/anaconda3/bin/python -u /home/jinjm/local/run_part3.py --fw fw1 --op runsim --algorithm {algo} --dataset {dataset}"
     # cmd = f'bash /home/jinjm/local/run_graph_1.sh {algo}'
@@ -340,6 +393,72 @@ def part3_moni(request, framework, algo, dataset):
             status=500
         )
 
+
+def part3_moni_editarg(request, algo, dataset, editarg):
+    print("[part3_editarg] 收到请求")
+
+    if algo in ['cf', 'gcn', 'ppr'] and dataset in ['Rmat-16','Rmat-18', 'Rmat-20','Rmat-17']:
+        return stream_log_file(algo, dataset)
+    
+    cmd = f"/home/jinjm/anaconda3/bin/python -u /home/jinjm/local/run_part3.py --fw fw1 --op runsim --algorithm {algo} --dataset {dataset} --editarg {editarg}"
+    # cmd = f'bash /home/jinjm/local/run_graph_1.sh {algo}'
+    print("执行命令:", cmd)
+    
+    try:
+        response = StreamingHttpResponse(
+            stream_ssh_command(pool86, cmd, slp=False),
+            content_type='text/event-stream',
+        )
+        response['Cache-Control'] = 'no-cache'
+        return response
+        
+    except Exception as e:
+        print(f"[part3] 响应创建失败: {str(e)}")
+        return JsonResponse(
+            {"status": 500, "error": str(e)},
+            status=500
+        )
+
+
+
+
+def stream_log_file(algo, dataset):
+    filename = algo + "_on_" + dataset
+    # 获取当前文件（views.py）的绝对路径目录（backend目录）
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+    
+    # 构建相对路径：backend -> 项目根目录 -> logfile -> 目标文件
+    log_file_path = os.path.normpath(os.path.join(current_dir, '..', 'logfile', f"{filename}.log"))
+        
+    # 检查文件是否存在
+    if not os.path.exists(log_file_path):
+        return HttpResponseNotFound(f"Log file {filename}.log not found")
+    
+    # 检查是否为合法文件（防止目录遍历攻击）
+    if not os.path.isfile(log_file_path):
+        return HttpResponse("Invalid file path", status=400)
+    
+    def file_stream():
+        """生成器函数：逐行读取文件并发送"""
+        try:
+            with open(log_file_path, 'r') as f:
+                while True:
+                    line = f.readline()
+                    if not line:
+                        break  # 文件读取结束
+                    yield f"data: {line}\n\n"
+                    time.sleep(0.02)  # 控制发送速度（可选）
+                yield "data: [done]\n\n"
+        except Exception as e:
+            yield f"data: [ERROR] {str(e)}\n\n"
+
+    # 返回流式响应
+    response = StreamingHttpResponse(
+        file_stream(),
+        content_type='text/event-stream',
+    )
+    response['Cache-Control'] = 'no-cache'
+    return response
 
 
 def part3_moni2(request, algo, dataset):

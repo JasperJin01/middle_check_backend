@@ -14,3 +14,10 @@ pip install paramiko
 cd 项目目录
 python manage.py runserver 0.0.0.0:8000
 ```
+
+或者挂载到后台执行：
+```
+nohup python manage.py runserver 0.0.0.0:8000 > server_log.log 2>&1 &
+```
+
+lsof -i :8000
