@@ -10,7 +10,8 @@ from .ssh_pool import SSHConnectionPool
 
 
 # KEY_PATH = '/home/jasper/Developer/PyCharm/id_rsa_hust_server'
-KEY_PATH = '/home/jinjm/.ssh/id_rsa_hust_server'
+KEY_PATH = '/Users/jiminj/.ssh/id_rsa_hust_server'
+# KEY_PATH = '/home/jinjm/.ssh/id_rsa_hust_server'
 
 SERVER86 = 'jinjm@222.20.98.153'
 
@@ -323,7 +324,8 @@ def part3data(request, framework, algo, data_type):
 
 def part3_writecga(request, algo):
     print("[part3_writecga] 收到请求")
-    CGA_DIR = Path("/home/jinjm/graph_computing/cga")
+    REMOTE_CGA_DIR = "/home/jinjm/graph_computing/cga"
+    
     if request.method != 'POST':
         return JsonResponse(
             {"status": 405, "error": "Method not allowed"}, 
@@ -341,27 +343,38 @@ def part3_writecga(request, algo):
                 status=400
             )
         
-        # 构造文件路径
-        file_path = CGA_DIR / f"{algo}.py"
+        # 构造远程文件路径
+        remote_file_path = f"{REMOTE_CGA_DIR}/{algo}.py"
         
-        # 写入文件
-        with open(file_path, 'w') as f:
-            f.write(code)
+        # 准备写入远程文件的命令
+        # 使用echo和base64编码避免引号和特殊字符问题
+        import base64
+        encoded_content = base64.b64encode(code.encode()).decode()
+        cmd = f"echo '{encoded_content}' | base64 -d > {remote_file_path}"
+        
+        # 通过SSH执行写入命令
+        stdout, stderr = execute_ssh_command(pool86, cmd)
+        
+        if stderr:
+            return JsonResponse({
+                "status": 500, 
+                "error": f"无法写入远程文件: {stderr}"
+            }, status=500)
         
         return JsonResponse({
             "status": 200,
-            "message": "Code saved successfully",
-            "path": str(file_path)
+            "message": "代码已成功保存到远程服务器",
+            "path": remote_file_path
         })
         
     except json.JSONDecodeError:
         return JsonResponse(
-            {"status": 400, "error": "Invalid JSON format"},
+            {"status": 400, "error": "无效的JSON格式"},
             status=400
         )
     except Exception as e:
         return JsonResponse(
-            {"status": 500, "error": f"Server error: {str(e)}"},
+            {"status": 500, "error": f"服务器错误: {str(e)}"},
             status=500
         )
 
